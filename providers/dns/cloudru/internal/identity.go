@@ -1,17 +1,22 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/go-acme/lego/v4/providers/dns/internal/errutils"
 )
+
+type AuthRequest struct {
+	KeyID  string `json:"keyId"`
+	Secret string `json:"secret"`
+}
 
 type token string
 
@@ -20,23 +25,32 @@ const tokenKey token = "token"
 // obtainToken Logs into cloud.ru and acquires a bearer token for use in future API calls.
 // https://cloud.ru/ru/docs/clouddns/ug/topics/api-ref_authentication.html
 func (c *Client) obtainToken(ctx context.Context) (*Token, error) {
-	data := make(url.Values)
-	data.Set("grant_type", "access_key")
-	data.Set("client_id", c.keyID)
-	data.Set("client_secret", c.secret)
+	data := AuthRequest{
+		KeyID:  c.keyID,
+		Secret: c.secret,
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.AuthEndpoint.String(), strings.NewReader(data.Encode()))
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.AuthEndpoint.String(),
+		bytes.NewBuffer(jsonData),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, errutils.NewHTTPDoError(req, err)
 	}
-
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {

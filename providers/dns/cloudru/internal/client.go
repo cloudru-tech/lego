@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -17,8 +18,8 @@ import (
 
 // Default API endpoints.
 const (
-	APIBaseURL  = "https://console.cloud.ru/api/clouddns/v1"
-	AuthBaseURL = "https://auth.iam.cloud.ru/auth/system/openid/token"
+	APIBaseURL  = "https://console.cloud.ru/u-api/svp/evodns/v1"
+	AuthBaseURL = "https://iam.api.cloud.ru/api/v1/auth/token"
 )
 
 // Client the Cloud.ru API client.
@@ -48,63 +49,95 @@ func NewClient(login, secret string) *Client {
 	}
 }
 
-func (c *Client) GetZones(ctx context.Context, parentID string) ([]Zone, error) {
+// GetZones returns all zones available for account.
+func (c *Client) GetZones(ctx context.Context, projectID string) ([]Zone, error) {
+	var allZones []Zone
+	pageSize := 10
+	offset := 0
 	endpoint := c.APIEndpoint.JoinPath("zones")
-
 	query := endpoint.Query()
-	query.Set("parentId", parentID)
-	endpoint.RawQuery = query.Encode()
+	query.Set("projectId", projectID)
 
-	req, err := newJSONRequest(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
+	for {
+		query.Set("page", strconv.Itoa(pageSize))
+		query.Set("offset", strconv.Itoa(offset))
+		endpoint.RawQuery = query.Encode()
+
+		req, err := newJSONRequest(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		var zones ZonesAPIResponse
+		err = c.do(req, &zones)
+		if err != nil {
+			return nil, err
+		}
+
+		allZones = append(allZones, zones.Zones...)
+
+		if zones.Total < offset+pageSize {
+			break
+		}
+		offset += pageSize
 	}
 
-	var zones APIResponse[Zone]
-	err = c.do(req, &zones)
-	if err != nil {
-		return nil, err
-	}
-
-	return zones.Items, nil
+	return allZones, nil
 }
 
 func (c *Client) GetRecords(ctx context.Context, zoneID string) ([]Record, error) {
-	endpoint := c.APIEndpoint.JoinPath("zones", zoneID, "records")
+	endpoint := c.APIEndpoint.JoinPath("public", "records")
+	var allRecords []Record
+	pageSize := 10
+	offset := 0
+	query := endpoint.Query()
+	query.Set("zoneId", zoneID)
 
-	req, err := newJSONRequest(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
+	for {
+		query.Set("page", strconv.Itoa(pageSize))
+		query.Set("offset", strconv.Itoa(offset))
+		endpoint.RawQuery = query.Encode()
+
+		req, err := newJSONRequest(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		var records RecordsAPIResponse
+		err = c.do(req, &records)
+		if err != nil {
+			return nil, err
+		}
+
+		allRecords = append(allRecords, records.Records...)
+
+		if records.Total < offset+pageSize {
+			break
+		}
+		offset += pageSize
 	}
 
-	var records APIResponse[Record]
-	err = c.do(req, &records)
-	if err != nil {
-		return nil, err
-	}
-
-	return records.Items, nil
+	return allRecords, nil
 }
 
-func (c *Client) CreateRecord(ctx context.Context, zoneID string, record Record) (*Record, error) {
-	endpoint := c.APIEndpoint.JoinPath("zones", zoneID, "records")
+func (c *Client) CreateRecord(ctx context.Context, request CreateRecordRequest) error {
+	endpoint := c.APIEndpoint.JoinPath("public", "records")
 
-	req, err := newJSONRequest(ctx, http.MethodPost, endpoint, record)
+	req, err := newJSONRequest(ctx, http.MethodPost, endpoint, request)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	var result Record
-	err = c.do(req, &result)
+	err = c.do(req, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return &result, nil
+	return nil
 }
 
-func (c *Client) DeleteRecord(ctx context.Context, zoneID, name, recordType string) error {
-	endpoint := c.APIEndpoint.JoinPath("zones", zoneID, "records", name, recordType)
+func (c *Client) DeleteRecord(ctx context.Context, recordID string) error {
+	endpoint := c.APIEndpoint.JoinPath("public", "records", recordID)
 
 	req, err := newJSONRequest(ctx, http.MethodDelete, endpoint, nil)
 	if err != nil {
@@ -112,6 +145,19 @@ func (c *Client) DeleteRecord(ctx context.Context, zoneID, name, recordType stri
 	}
 
 	return c.do(req, nil)
+}
+
+func (c *Client) FindRecordByName(ctx context.Context, zoneID, recordName string) (*Record, error) {
+	records, err := c.GetRecords(ctx, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range records {
+		if record.Name == recordName {
+			return &record, nil
+		}
+	}
+	return nil, errors.New("record by name not found")
 }
 
 func (c *Client) do(req *http.Request, result any) error {

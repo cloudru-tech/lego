@@ -1,28 +1,28 @@
-// Package cloudru implements a DNS provider for solving the DNS-01 challenge using cloud.ru DNS.
+// Package cloudru implements a DNS provider for solving the DNS-01 challenge using cloud.ru Evo DNS (v2).
 package cloudru
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/go-acme/lego/v4/providers/dns/cloudru/internal"
 	"net/http"
-	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/challenge/dns01"
 	"github.com/go-acme/lego/v4/platform/config/env"
-	"github.com/go-acme/lego/v4/providers/dns/cloudru/internal"
 )
 
 // Environment variables names.
 const (
 	envNamespace = "CLOUDRU_"
 
-	EnvServiceInstanceID = envNamespace + "SERVICE_INSTANCE_ID"
-	EnvKeyID             = envNamespace + "KEY_ID"
-	EnvSecret            = envNamespace + "SECRET"
+	EnvProjectID = envNamespace + "PROJECT_ID"
+	EnvKeyID     = envNamespace + "KEY_ID"
+	EnvSecret    = envNamespace + "SECRET"
 
 	EnvTTL                = envNamespace + "TTL"
 	EnvPropagationTimeout = envNamespace + "PROPAGATION_TIMEOUT"
@@ -35,9 +35,9 @@ var _ challenge.ProviderTimeout = (*DNSProvider)(nil)
 
 // Config is used to configure the creation of the DNSProvider.
 type Config struct {
-	ServiceInstanceID string
-	KeyID             string
-	Secret            string
+	ProjectID string
+	KeyID     string
+	Secret    string
 
 	PropagationTimeout time.Duration
 	PollingInterval    time.Duration
@@ -68,15 +68,15 @@ type DNSProvider struct {
 
 // NewDNSProvider returns a DNSProvider instance configured for cloud.ru.
 // Credentials must be passed in the environment variables:
-// CLOUDRU_SERVICE_INSTANCE_ID, CLOUDRU_KEY_ID, and CLOUDRU_SECRET.
+// CLOUDRU_PROJECT_ID, CLOUDRU_KEY_ID, and CLOUDRU_SECRET.
 func NewDNSProvider() (*DNSProvider, error) {
-	values, err := env.Get(EnvServiceInstanceID, EnvKeyID, EnvSecret)
+	values, err := env.Get(EnvProjectID, EnvKeyID, EnvSecret)
 	if err != nil {
 		return nil, fmt.Errorf("cloudru: %w", err)
 	}
 
 	config := NewDefaultConfig()
-	config.ServiceInstanceID = values[EnvServiceInstanceID]
+	config.ProjectID = values[EnvProjectID]
 	config.KeyID = values[EnvKeyID]
 	config.Secret = values[EnvSecret]
 
@@ -89,7 +89,7 @@ func NewDNSProviderConfig(config *Config) (*DNSProvider, error) {
 		return nil, errors.New("cloudru: the configuration of the DNS provider is nil")
 	}
 
-	if config.ServiceInstanceID == "" || config.KeyID == "" || config.Secret == "" {
+	if config.ProjectID == "" || config.KeyID == "" || config.Secret == "" {
 		return nil, errors.New("cloudru: some credentials information are missing")
 	}
 
@@ -122,21 +122,28 @@ func (d *DNSProvider) Present(domain, token, keyAuth string) error {
 		return fmt.Errorf("cloudru: %w", err)
 	}
 
-	zone, err := d.getZoneInformationByName(ctx, d.config.ServiceInstanceID, authZone)
+	zone, err := d.getZoneInformationByName(ctx, d.config.ProjectID, authZone)
 	if err != nil {
-		return fmt.Errorf("cloudru: could not find zone information (ServiceInstanceID: %s, zone: %s): %w", d.config.ServiceInstanceID, authZone, err)
+		return fmt.Errorf("cloudru: could not find zone information (ProjectID: %s, zone: %s): %w", d.config.ProjectID, authZone, err)
 	}
 
-	record := internal.Record{
-		Name:   info.EffectiveFQDN,
-		Type:   "TXT",
+	name := strings.TrimSuffix(info.EffectiveFQDN, "."+domain+".")
+	createRequest := internal.CreateRecordRequest{
+		Name:   name,
+		Type:   internal.TxtRecordType,
 		Values: []string{info.Value},
-		TTL:    strconv.Itoa(d.config.TTL),
+		TTL:    d.config.TTL,
+		ZoneID: zone.Meta.ID,
 	}
 
-	newRecord, err := d.client.CreateRecord(ctx, zone.ID, record)
+	err = d.client.CreateRecord(ctx, createRequest)
 	if err != nil {
 		return fmt.Errorf("cloudru: could not create record: %w", err)
+	}
+
+	newRecord, err := d.client.FindRecordByName(ctx, zone.Meta.ID, name)
+	if err != nil {
+		return fmt.Errorf("cloudru: could not find created record: %w", err)
 	}
 
 	d.recordsMu.Lock()
@@ -163,7 +170,7 @@ func (d *DNSProvider) CleanUp(domain, token, keyAuth string) error {
 		return fmt.Errorf("cloudru: %w", err)
 	}
 
-	err = d.client.DeleteRecord(ctx, record.ZoneID, record.Name, "TXT")
+	err = d.client.DeleteRecord(ctx, record.Meta.ID)
 	if err != nil {
 		return fmt.Errorf("cloudru: %w", err)
 	}
@@ -187,8 +194,8 @@ func (d *DNSProvider) Timeout() (timeout, interval time.Duration) {
 	return d.config.PropagationTimeout, d.config.PollingInterval
 }
 
-func (d *DNSProvider) getZoneInformationByName(ctx context.Context, parentID, name string) (internal.Zone, error) {
-	zs, err := d.client.GetZones(ctx, parentID)
+func (d *DNSProvider) getZoneInformationByName(ctx context.Context, projectID, name string) (internal.Zone, error) {
+	zs, err := d.client.GetZones(ctx, projectID)
 	if err != nil {
 		return internal.Zone{}, err
 	}
