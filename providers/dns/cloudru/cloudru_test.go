@@ -11,7 +11,7 @@ import (
 const envDomain = envNamespace + "DOMAIN"
 
 var envTest = tester.NewEnvTest(
-	EnvServiceInstanceID,
+	EnvProjectID,
 	EnvKeyID,
 	EnvSecret).
 	WithDomain(envDomain)
@@ -25,9 +25,9 @@ func TestNewDNSProvider(t *testing.T) {
 		{
 			desc: "success",
 			envVars: map[string]string{
-				EnvServiceInstanceID: "123",
-				EnvKeyID:             "user",
-				EnvSecret:            "secret",
+				EnvProjectID: "123",
+				EnvKeyID:     "user",
+				EnvSecret:    "secret",
 			},
 		},
 		{
@@ -38,27 +38,27 @@ func TestNewDNSProvider(t *testing.T) {
 		{
 			desc: "missing service instance ID",
 			envVars: map[string]string{
-				EnvServiceInstanceID: "",
-				EnvKeyID:             "user",
-				EnvSecret:            "secret",
+				EnvProjectID: "",
+				EnvKeyID:     "user",
+				EnvSecret:    "secret",
 			},
 			expected: "cloudru: some credentials information are missing: CLOUDRU_SERVICE_INSTANCE_ID",
 		},
 		{
 			desc: "missing key ID",
 			envVars: map[string]string{
-				EnvServiceInstanceID: "123",
-				EnvKeyID:             "",
-				EnvSecret:            "secret",
+				EnvProjectID: "123",
+				EnvKeyID:     "",
+				EnvSecret:    "secret",
 			},
 			expected: "cloudru: some credentials information are missing: CLOUDRU_KEY_ID",
 		},
 		{
 			desc: "missing secret",
 			envVars: map[string]string{
-				EnvServiceInstanceID: "123",
-				EnvKeyID:             "user",
-				EnvSecret:            "",
+				EnvProjectID: "123",
+				EnvKeyID:     "user",
+				EnvSecret:    "",
 			},
 			expected: "cloudru: some credentials information are missing: CLOUDRU_SECRET",
 		},
@@ -129,7 +129,7 @@ func TestNewDNSProviderConfig(t *testing.T) {
 	for _, test := range testCases {
 		t.Run(test.desc, func(t *testing.T) {
 			config := NewDefaultConfig()
-			config.ServiceInstanceID = test.serviceInstanceID
+			config.ProjectID = test.serviceInstanceID
 			config.KeyID = test.keyID
 			config.Secret = test.secret
 

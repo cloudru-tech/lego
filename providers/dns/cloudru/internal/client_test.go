@@ -65,13 +65,15 @@ func TestClient_GetZones(t *testing.T) {
 
 	expected := []Zone{
 		{
-			ID:        "59556fcd-95ff-451f-b49b-9732f21f944a",
-			ParentID:  "2d7b6194-2b83-4f71-86fd-a1e727e347b2",
-			Name:      "example.com",
-			Valid:     true,
-			Delegated: true,
-			CreatedAt: time.Date(2023, 7, 23, 8, 12, 41, 0, time.UTC),
-			UpdatedAt: time.Date(2023, 7, 24, 5, 50, 28, 0, time.UTC),
+			Meta: Meta{
+				ID:        "59556fcd-95ff-451f-b49b-9732f21f944a",
+				CreateAt:  time.Date(2023, 7, 23, 8, 12, 41, 0, time.UTC),
+				UpdatedAt: time.Date(2023, 7, 24, 5, 50, 28, 0, time.UTC),
+			},
+			ProjectID:   "2d7b6194-2b83-4f71-86fd-a1e727e347b2",
+			Name:        "example.com",
+			ActiveState: true,
+			State:       "STATE_OK",
 		},
 	}
 	assert.Equal(t, expected, zones)
@@ -91,21 +93,19 @@ func TestClient_GetRecords(t *testing.T) {
 			Name:   "example.com.",
 			Type:   "SOA",
 			Values: []string{
-				"cdns-ns01.sbercloud.ru. mail.sbercloud.ru 1 120 3600 604800 3600",
+				"evo-cns01.cloud.ru. mail.sbercloud.ru 1 120 3600 604800 3600",
 			},
-			TTL:     "3600",
-			Enables: true,
+			TTL: 3600,
 		},
 		{
 			ZoneID: "59556fcd-95ff-451f-b49b-9732f21f944a",
 			Name:   "example.com.",
 			Type:   "NS",
 			Values: []string{
-				"cdns-ns01.sbercloud.ru.",
-				"cdns-ns02.sbercloud.ru.",
+				"evo-cns01.cloud.ru.",
+				"evo-cns02.cloud.ru.",
 			},
-			TTL:     "3600",
-			Enables: true,
+			TTL: 3600,
 		},
 		{
 			ZoneID: "59556fcd-95ff-451f-b49b-9732f21f944a",
@@ -114,8 +114,7 @@ func TestClient_GetRecords(t *testing.T) {
 			Values: []string{
 				"8.8.8.8",
 			},
-			TTL:     "3600",
-			Enables: true,
+			TTL: 3600,
 		},
 	}
 	assert.Equal(t, expected, records)
@@ -126,14 +125,15 @@ func TestClient_CreateRecord(t *testing.T) {
 
 	ctx := mockContext()
 
-	recordReq := Record{
+	recordReq := CreateRecordRequest{
 		Name:   "www.example.com.",
 		Type:   "TXT",
 		Values: []string{"text"},
-		TTL:    "3600",
+		TTL:    3600,
+		ZoneID: "59556fcd-95ff-451f-b49b-9732f21f944a",
 	}
 
-	record, err := client.CreateRecord(ctx, "zzz", recordReq)
+	record, err := client.CreateRecord(ctx, recordReq)
 	require.NoError(t, err)
 
 	expected := &Record{
@@ -143,8 +143,7 @@ func TestClient_CreateRecord(t *testing.T) {
 		Values: []string{
 			"txt",
 		},
-		TTL:     "3600",
-		Enables: true,
+		TTL: 3600,
 	}
 	assert.Equal(t, expected, record)
 }
